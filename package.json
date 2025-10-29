@@ -9,15 +9,27 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": ["*"],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "riot-launcher.helloWorld",
-        "title": "Hello World"
+        "command": "riot-launcher.riotFlash",
+        "title": "RIOT Flash",
+        "icon": "$(play)"
       }
-    ]
+    ],
+    "statusBar": {
+      "items": [
+        {
+          "id": "riotFlash",
+          "name": "RIOT Flash",
+          "text": "$(play) flash",
+          "command": "riot-launcher.riotFlash",
+          "alignment": "left"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
