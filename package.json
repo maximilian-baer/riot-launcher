@@ -16,8 +16,14 @@
       {
         "command": "riot-launcher.riotFlash",
         "title": "RIOT Flash",
-        "icon": "$(play)"
+        "icon": "$(zap)"
+      },
+      {
+        "command": "riot-launcher.riotTerm",
+        "title": "RIOT Term",
+        "icon": "$(play-circle)"
       }
+
     ],
     "statusBar": {
       "items": [
