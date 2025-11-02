@@ -1,12 +1,11 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
-import { deprecate } from 'util';
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
-export function activate(context: vscode.ExtensionContext) {
-
+export async function activate(context: vscode.ExtensionContext) {
     var type = "riotTaskProvider";
     vscode.tasks.registerTaskProvider(type, {
         provideTasks(token?: vscode.CancellationToken) {
@@ -21,61 +20,24 @@ export function activate(context: vscode.ExtensionContext) {
             return task;
         }
     });
-// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "riot-launcher" is now active!');
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	const flashDisposable = vscode.commands.registerCommand('riot-launcher.riotFlash', () => {
-		const terminal : vscode.Terminal = vscode.window.createTerminal("Riot Launcher");
-		// flash(terminal);
-		receiveFlashTask().then( (flashTask : vscode.Task) => {
-			vscode.tasks.executeTask(flashTask);
-		});
-	});
-
-	const termDisposable = vscode.commands.registerCommand('riot-launcher.riotTerm', () => {
-		const terminal : vscode.Terminal = vscode.window.createTerminal("Riot Launcher");
-		receiveTermTask().then( (termTask : vscode.Task) => {
-			vscode.tasks.executeTask(termTask);
-		});
-	});
-
-	context.subscriptions.push(flashDisposable);
-
-	context.subscriptions.push(termDisposable);
-
-	// Function runs via VS-Code Terminal (rather dirty way)
-	async function flash(terminal: vscode.Terminal) {
-		terminal.show(true);
-		const cDir : string = "cd ~/Uni/IOT/RIOT/examples/basic/blinky";
-		const cCommand : string = "make flash BOARD=adafruit-feather-nrf52840-sense";
-		terminal.sendText(cDir + " && " + cCommand);
+	async function readBundledBoards(): Promise<string[]> {
+		const text : string = await fs.promises.readFile('./Uni/IOT/riot-launcher/resources/boards.txt', 'utf8');
+		return text.split('\n').filter(line => line.length > 0);
 	}
 
-	async function receiveFlashTask() {
-		var type : string 	= "riotTaskProvider";
-		const cDir : string = "cd ~/Uni/IOT/RIOT/examples/basic/leds_shell";
-		const cCommand : string = "make flash BOARD=adafruit-feather-nrf52840-sense";
+	const boards : string[] = await readBundledBoards().catch<string[]>( (_err) => ['adafruit-feather-nrf52840-sense'] );
+	var selectedBoard : string;
 
-		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCommand);
-		var flash : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
-                    "Build", "Flash Task", execution);
-		return flash;
-	}
+	const riotDropDownBoard = vscode.window.createStatusBarItem(
+		vscode.StatusBarAlignment.Left, 101
+	);
 
-	async function receiveTermTask() {
-		var type : string 	= "riotTaskProvider";
-		const cDir : string = "cd ~/Uni/IOT/RIOT/examples/basic/leds_shell";
-		const cCommand : string = "make term BOARD=adafruit-feather-nrf52840-sense";
+	riotDropDownBoard.text = '$(chefron-down) Select Board';
+	riotDropDownBoard.command = 'riot-launcher.selectBoard';
+	riotDropDownBoard.tooltip = 'Select the target board for RIOT operations';
+	riotDropDownBoard.show();
 
-		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCommand);
-		var flash : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
-                    "Build", "Flash Task", execution);
-		return flash;
-	}
 
 	const riotFlashStatusBarItem = vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Left, 100
@@ -97,8 +59,76 @@ export function activate(context: vscode.ExtensionContext) {
     
     context.subscriptions.push(riotFlashStatusBarItem);
 	context.subscriptions.push(riotTermStatusBarItem);
+	context.subscriptions.push(riotDropDownBoard);
 
 
+	// Use the console to output diagnostic information (console.log) and errors (console.error)
+	// This line of code will only be executed once when your extension is activated
+	console.log('Congratulations, your extension "riot-launcher" is now active!');
+
+	// The command has been defined in the package.json file
+	// Now provide the implementation of the command with registerCommand
+	// The commandId parameter must match the command field in package.json
+
+	const selectBoardDisposable = vscode.commands.registerCommand('riot-launcher.selectBoard', async () => {
+	 	const pick : string | undefined = await vscode.window.showQuickPick(readBundledBoards());
+		if(pick) {
+			riotDropDownBoard.text = `$(chefron-down) ${pick}`;
+			selectedBoard = pick;
+		}
+	});
+
+	const flashDisposable = vscode.commands.registerCommand('riot-launcher.riotFlash', () => {
+		const terminal : vscode.Terminal = vscode.window.createTerminal("Riot Launcher");
+		// flash(terminal);
+		receiveFlashTask().then( (flashTask : vscode.Task) => {
+			vscode.tasks.executeTask(flashTask);
+		});
+	});
+
+	const termDisposable = vscode.commands.registerCommand('riot-launcher.riotTerm', () => {
+		const terminal : vscode.Terminal = vscode.window.createTerminal("Riot Launcher");
+		receiveTermTask().then( (termTask : vscode.Task) => {
+			vscode.tasks.executeTask(termTask);
+		});
+	});
+
+	context.subscriptions.push(flashDisposable);
+
+	context.subscriptions.push(termDisposable);
+
+	async function receiveFlashTask() {
+		var type : string 	= "riotTaskProvider";
+		const board : string = selectedBoard ?? 'adafruit-feather-nrf52840-sense';
+		const cDir : string = "cd ~/Uni/IOT/RIOT/examples/basic/leds_shell";
+		const cCommand : string = "make flash BOARD=" + board;
+
+		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCommand);
+		var flash : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
+                    "Build", "Flash Task", execution);
+		return flash;
+	}
+
+	async function receiveTermTask() {
+		var type : string 	= "riotTaskProvider";
+		const board : string = selectedBoard ?? 'adafruit-feather-nrf52840-sense';
+		const cDir : string = "cd ~/Uni/IOT/RIOT/examples/basic/leds_shell";
+		const cCommand : string = "make term BOARD=" + board;
+
+		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCommand);
+		var flash : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
+                    "Build", "Flash Task", execution);
+		return flash;
+	}
+
+	
+	// Function runs via VS-Code Terminal (rather dirty way)
+	async function flash(terminal: vscode.Terminal) {
+		terminal.show(true);
+		const cDir : string = "cd ~/Uni/IOT/RIOT/examples/basic/blinky";
+		const cCommand : string = "make flash BOARD=adafruit-feather-nrf52840-sense";
+		terminal.sendText(cDir + " && " + cCommand);
+	}
 }
 
 

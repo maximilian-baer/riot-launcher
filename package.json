@@ -15,13 +15,15 @@
     "commands": [
       {
         "command": "riot-launcher.riotFlash",
-        "title": "RIOT Flash",
-        "icon": "$(zap)"
+        "title": "RIOT Flash"
       },
       {
         "command": "riot-launcher.riotTerm",
-        "title": "RIOT Term",
-        "icon": "$(play-circle)"
+        "title": "RIOT Term"
+      },
+      {
+        "command": "riot-launcher.selectBoard",
+        "title": "RIOT Board Selection"
       }
 
     ],
