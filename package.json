@@ -24,9 +24,26 @@
       {
         "command": "riot-launcher.selectBoard",
         "title": "RIOT Board Selection"
+      },
+      {
+        "command": "riot-launcher.selectExampleFolder",
+        "title": "RIOT Example Folder Selection"
+      },
+      {
+        "command": "riot-launcher.setRiotPath",
+        "title": "RIOT Set Path"
       }
-
     ],
+    "configuration": {
+      "title": "RIOT Launcher",
+      "properties": {
+        "riot-launcher.riotPath": {
+          "type": "string",
+          "default": "/path/to/your/riot",
+          "description": "Path to the RIOT OS installation directory."
+        }
+      }
+    },
     "statusBar": {
       "items": [
         {

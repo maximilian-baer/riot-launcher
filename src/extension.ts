@@ -6,21 +6,6 @@ import * as fs from 'fs';
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
-    var type = "riotTaskProvider";
-    vscode.tasks.registerTaskProvider(type, {
-        provideTasks(token?: vscode.CancellationToken) {
-            var execution = new vscode.ShellExecution("echo \"Hello World\"");
-            var problemMatchers = ["$myProblemMatcher"];
-            return [
-                new vscode.Task({type: type}, vscode.TaskScope.Workspace,
-                    "Build", "myExtension", execution, problemMatchers)
-            ];
-        },
-        resolveTask(task: vscode.Task, token?: vscode.CancellationToken) {
-            return task;
-        }
-    });
-
 	async function readBundledBoards(): Promise<string[]> {
 		const text : string = await fs.promises.readFile('./Uni/IOT/riot-launcher/resources/boards.txt', 'utf8');
 		return text.split('\n').filter(line => line.length > 0);
@@ -70,6 +55,46 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Now provide the implementation of the command with registerCommand
 	// The commandId parameter must match the command field in package.json
 
+	const config = vscode.workspace.getConfiguration('riot-launcher');
+	var riotBasePath : string = config.get<string>('riotPath') || '';
+
+	const setRiotPathDisposable = vscode.commands.registerCommand('riot-launcher.setRiotPath', async () => {
+		const result = await vscode.window.showOpenDialog({
+			canSelectFiles: false,
+			canSelectFolders: true,
+			canSelectMany: false,
+			openLabel: 'Select RIOT Base Folder'
+		});
+
+		if (result && result.length > 0) {
+			riotBasePath = result[0].fsPath;
+			await config.update('riotPath', riotBasePath, vscode.ConfigurationTarget.Global);
+			vscode.window.showInformationMessage(`Set RIOT Path to: ${riotBasePath}`);
+		}
+	});
+
+	let exampleFolderPath: string | undefined;
+
+	const selectExampleFolderDisposable = vscode.commands.registerCommand('riot-launcher.selectExampleFolder', async () => {
+		if (!riotBasePath) {
+			vscode.window.showErrorMessage('RIOT Path is not set. Please set it first.');
+			return;
+		}
+
+		const result = await vscode.window.showOpenDialog({
+			canSelectFiles: false,
+			canSelectFolders: true,
+			canSelectMany: false,
+			defaultUri: vscode.Uri.file(riotBasePath),
+			openLabel: 'Select Example Folder'
+		});
+
+		if (result && result.length > 0) {
+			exampleFolderPath = result[0].fsPath;
+			vscode.window.showInformationMessage(`Selected Example Folder: ${exampleFolderPath}`);
+		}
+	});
+
 	const selectBoardDisposable = vscode.commands.registerCommand('riot-launcher.selectBoard', async () => {
 	 	const pick : string | undefined = await vscode.window.showQuickPick(readBundledBoards());
 		if(pick) {
@@ -100,10 +125,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	async function receiveFlashTask() {
 		var type : string 	= "riotTaskProvider";
 		const board : string = selectedBoard ?? 'adafruit-feather-nrf52840-sense';
-		const cDir : string = "cd ~/Uni/IOT/RIOT/examples/basic/leds_shell";
+		const cDir : string = "cd " + exampleFolderPath;
+		const cCompile : string = "make compile-commands BOARD=" + board;		
 		const cCommand : string = "make flash BOARD=" + board;
 
-		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCommand);
+		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCompile + "&&" + cCommand);
 		var flash : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
                     "Build", "Flash Task", execution);
 		return flash;
@@ -112,7 +138,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	async function receiveTermTask() {
 		var type : string 	= "riotTaskProvider";
 		const board : string = selectedBoard ?? 'adafruit-feather-nrf52840-sense';
-		const cDir : string = "cd ~/Uni/IOT/RIOT/examples/basic/leds_shell";
+		const cDir : string = "cd " + exampleFolderPath;
+		const cCompile : string = "make compile-commands";
 		const cCommand : string = "make term BOARD=" + board;
 
 		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCommand);
