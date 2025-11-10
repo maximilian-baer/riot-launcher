@@ -1,4 +1,4 @@
-  {
+{
   "name": "riot-launcher",
   "displayName": "RIOT Launcher",
   "description": "Through this extension the user will be able to build, flash and enter the RIOT console via the User Interface of VS-Code.",
@@ -9,7 +9,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": ["*"],
+  "activationEvents": [
+    "*"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -44,14 +46,49 @@
         }
       }
     },
-    "statusBar": {
-      "items": [
+    "viewsContainers": {
+      "activitybar": [
         {
-          "id": "riotFlash",
-          "name": "RIOT Flash",
-          "text": "$(play) flash",
+          "id": "riotContainer",
+          "title": "RIOT",
+          "icon": "resources/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "riotContainer": [
+        {
+          "id": "riotView",
+          "name": "RIOT Tools"
+        }
+      ]
+    },
+    "menus": {
+      "activationEvents": [
+        {
+          "command": "riot-launcher.selectBoard",
+          "when": "view == riotView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "riot-launcher.selectExampleFolder",
+          "when": "view == riotView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "riot-launcher.setRiotPath",
+          "when": "view == riotView",
+          "group": "navigation@3"
+        },
+        {
           "command": "riot-launcher.riotFlash",
-          "alignment": "left"
+          "when": "view == riotView",
+          "group": "navigation@4"
+        },
+        {
+          "command": "riot-launcher.riotTerm",
+          "when": "view == riotView",
+          "group": "navigation@5"
         }
       ]
     }
@@ -65,14 +102,15 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.105.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
+    "@types/shelljs": "^0.8.17",
+    "@types/vscode": "^1.105.0",
     "@typescript-eslint/eslint-plugin": "^8.45.0",
     "@typescript-eslint/parser": "^8.45.0",
-    "eslint": "^9.36.0",
-    "typescript": "^5.9.3",
     "@vscode/test-cli": "^0.0.11",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.36.0",
+    "typescript": "^5.9.3"
   }
 }

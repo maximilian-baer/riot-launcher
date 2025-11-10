@@ -2,6 +2,9 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import { exec } from 'child_process';
+import * as shell from 'shelljs';
+import * as util from 'util';
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -11,39 +14,14 @@ export async function activate(context: vscode.ExtensionContext) {
 		return text.split('\n').filter(line => line.length > 0);
 	}
 
-	const boards : string[] = await readBundledBoards().catch<string[]>( (_err) => ['adafruit-feather-nrf52840-sense'] );
+	let boards : string[] = await readBundledBoards().catch<string[]>( (_err) => ['adafruit-feather-nrf52840-sense'] );
 	var selectedBoard : string;
 
 	const riotDropDownBoard = vscode.window.createStatusBarItem(
 		vscode.StatusBarAlignment.Left, 101
 	);
 
-	riotDropDownBoard.text = '$(chefron-down) Select Board';
-	riotDropDownBoard.command = 'riot-launcher.selectBoard';
-	riotDropDownBoard.tooltip = 'Select the target board for RIOT operations';
-	riotDropDownBoard.show();
-
-
-	const riotFlashStatusBarItem = vscode.window.createStatusBarItem(
-        vscode.StatusBarAlignment.Left, 100
-    );
-	
-    riotFlashStatusBarItem.text = "$(zap)Flash";
-    riotFlashStatusBarItem.command = 'riot-launcher.riotFlash';
-    riotFlashStatusBarItem.tooltip = 'Flash RIOT application onto connected board';
-    riotFlashStatusBarItem.show();
-
-	const riotTermStatusBarItem = vscode.window.createStatusBarItem(
-		vscode.StatusBarAlignment.Left, 99
-	);
-
-	riotTermStatusBarItem.text = "$(play-circle)Term";
-    riotTermStatusBarItem.command = 'riot-launcher.riotTerm';
-    riotTermStatusBarItem.tooltip = 'Enter RIOT terminal for connected board';
-    riotTermStatusBarItem.show();
     
-    context.subscriptions.push(riotFlashStatusBarItem);
-	context.subscriptions.push(riotTermStatusBarItem);
 	context.subscriptions.push(riotDropDownBoard);
 
 
@@ -58,6 +36,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	const config = vscode.workspace.getConfiguration('riot-launcher');
 	var riotBasePath : string = config.get<string>('riotPath') || '';
 
+  	const provider = new CmdProvider();
+	context.subscriptions.push(vscode.window.registerTreeDataProvider('riotView', provider));
+
+
 	const setRiotPathDisposable = vscode.commands.registerCommand('riot-launcher.setRiotPath', async () => {
 		const result = await vscode.window.showOpenDialog({
 			canSelectFiles: false,
@@ -71,7 +53,35 @@ export async function activate(context: vscode.ExtensionContext) {
 			await config.update('riotPath', riotBasePath, vscode.ConfigurationTarget.Global);
 			vscode.window.showInformationMessage(`Set RIOT Path to: ${riotBasePath}`);
 		}
+		loadBoards().then( (loadedBoards : string[]) => boards = loadedBoards);
 	});
+
+
+const execAsync = util.promisify(exec);
+
+async function loadBoards(): Promise<string[]> {
+  try {
+    const { stdout } = await execAsync(
+      `cd "${riotBasePath}" && make info-boards`
+    );
+
+    const boards: string[] = stdout
+      .toString()
+      .trim()
+      .split(/\s+/)       // besser als nur ' '
+      .filter(Boolean);
+    
+	  vscode.window.showInformationMessage(`Loaded ${boards.length} boards from RIOT Path.`);
+	  return boards.length > 0
+      ? boards
+      : ['adafruit-feather-nrf52840-sense'];
+  	} catch (error) {
+    	vscode.window.showErrorMessage(
+     	'Error loading boards from RIOT Path. Using default board.'
+    	);
+    	return ['adafruit-feather-nrf52840-sense'];
+  	}	
+}
 
 	let exampleFolderPath: string | undefined;
 
@@ -161,3 +171,55 @@ export async function activate(context: vscode.ExtensionContext) {
 
 // This method is called when your extension is deactivated
 export function deactivate() {}
+
+/* Items shown in TreeView */ 
+class CmdItem extends vscode.TreeItem {
+	constructor(label : string, commandId: any, icon: any) {
+		super(label, vscode.TreeItemCollapsibleState.None);
+		this.command = { command : commandId, title: label };
+		if(typeof icon === 'string') {
+			this.iconPath = new vscode.ThemeIcon(icon);
+		} else if(icon) {
+			this.iconPath = icon;
+		}
+	} 
+}
+
+class CmdProvider {
+	entries: { label: string; cmd: string; icon: string; }[];
+	constructor() {
+		this.entries = [
+			{
+				label : 'Set RIOT Path',
+				cmd: 'riot-launcher.setRiotPath',
+				icon: 'file-directory'
+			},
+			{
+				label : 'Select Example Folder',
+				cmd: 'riot-launcher.selectExampleFolder',
+				icon: 'folder'
+			},
+			{
+				label : 'Select Board',
+				cmd: 'riot-launcher.selectBoard',
+				icon: 'keybindings-record-keys'
+			},
+			{
+				label : 'Flash',
+				cmd: 'riot-launcher.riotFlash',
+				icon: 'zap'
+			},
+			{
+				label : 'Term',
+				cmd: 'riot-launcher.riotTerm',
+				icon: 'terminal-powershell'
+			}
+		];			
+	}
+	getTreeItem(e: vscode.TreeItem) { return e; }
+	getChildren() {
+    	return Promise.resolve(this.entries.map(e => new CmdItem(e.label, e.cmd, e.icon)));
+  	}
+
+}
+	
