@@ -3,8 +3,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { exec } from 'child_process';
-import * as shell from 'shelljs';
 import * as util from 'util';
+import { stdout } from 'process';
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -57,31 +57,31 @@ export async function activate(context: vscode.ExtensionContext) {
 	});
 
 
-const execAsync = util.promisify(exec);
+	const execAsync = util.promisify(exec);
 
-async function loadBoards(): Promise<string[]> {
-  try {
-    const { stdout } = await execAsync(
-      `cd "${riotBasePath}" && make info-boards`
-    );
+	async function loadBoards(): Promise<string[]> {
+	try {
+		const { stdout } = await execAsync(
+		`cd "${riotBasePath}" && make info-boards`
+		);
 
-    const boards: string[] = stdout
-      .toString()
-      .trim()
-      .split(/\s+/)       // besser als nur ' '
-      .filter(Boolean);
-    
-	  vscode.window.showInformationMessage(`Loaded ${boards.length} boards from RIOT Path.`);
-	  return boards.length > 0
-      ? boards
-      : ['adafruit-feather-nrf52840-sense'];
-  	} catch (error) {
-    	vscode.window.showErrorMessage(
-     	'Error loading boards from RIOT Path. Using default board.'
-    	);
-    	return ['adafruit-feather-nrf52840-sense'];
-  	}	
-}
+		const boards: string[] = stdout
+		.toString()
+		.trim()
+		.split(/\s+/)       //Escape characters for SPACE
+		.filter(Boolean);
+		
+		vscode.window.showInformationMessage(`Loaded ${boards.length} boards from RIOT Path.`);
+		return boards.length > 0
+		? boards
+		: ['adafruit-feather-nrf52840-sense'];
+		} catch (error) {
+			vscode.window.showErrorMessage(
+			'Error loading boards from RIOT Path. Using default board.'
+			); 
+			return ['adafruit-feather-nrf52840-sense'];
+		}	
+	}
 
 	let exampleFolderPath: string | undefined;
 
@@ -95,13 +95,24 @@ async function loadBoards(): Promise<string[]> {
 			canSelectFiles: false,
 			canSelectFolders: true,
 			canSelectMany: false,
-			defaultUri: vscode.Uri.file(riotBasePath),
 			openLabel: 'Select Example Folder'
 		});
 
 		if (result && result.length > 0) {
 			exampleFolderPath = result[0].fsPath;
 			vscode.window.showInformationMessage(`Selected Example Folder: ${exampleFolderPath}`);
+			try {
+				const { stdout } = await execAsync(
+					'cd ' + exampleFolderPath + ' && make info-debug-variable-RIOTBASE'
+				);
+				riotBasePath = stdout.toString().trim();
+				vscode.window.showInformationMessage(`Determined RIOT Base Path: ${riotBasePath}`);
+				loadBoards().then( (loadedBoards : string[]) => boards = loadedBoards);
+			}catch (error) {
+				vscode.window.showErrorMessage(
+					'Error determining RIOT Base Path from Makefile.'
+				); 
+			}
 		}
 	});
 
@@ -135,29 +146,45 @@ async function loadBoards(): Promise<string[]> {
 	async function receiveFlashTask() {
 		var type : string 	= "riotTaskProvider";
 		const board : string = selectedBoard ?? 'adafruit-feather-nrf52840-sense';
+		if(exampleFolderPath) {
+			vscode.window.showErrorMessage('Example Folder is not set correctly.');
+		}
 		const cDir : string = "cd " + exampleFolderPath;
 		const cCompile : string = "make compile-commands BOARD=" + board;		
 		const cCommand : string = "make flash BOARD=" + board;
 
 		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCompile + "&&" + cCommand);
 		var flash : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
-                    "Build", "Flash Task", execution);
+                    "Flash", "riot-launcher", execution);
 		return flash;
 	}
 
 	async function receiveTermTask() {
 		var type : string 	= "riotTaskProvider";
 		const board : string = selectedBoard ?? 'adafruit-feather-nrf52840-sense';
+		if(exampleFolderPath) {
+			vscode.window.showErrorMessage('Example Folder is not set correctly.');
+		}
 		const cDir : string = "cd " + exampleFolderPath;
 		const cCompile : string = "make compile-commands";
 		const cCommand : string = "make term BOARD=" + board;
 
 		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCommand);
 		var flash : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
-                    "Build", "Flash Task", execution);
+                    "Term", "riot-launcher", execution);
 		return flash;
 	}
 
+	async function receiveRiotBasePath() {
+		var type : string 	= "riotTaskProvider";
+		const cDir : string = "cd " + exampleFolderPath;
+		const cDetermineRiot : string = "make info-debug-variable-RIOTBASE";
+
+		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cDetermineRiot);
+		var task : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
+                    "Set Path", "riot-launcher", execution);
+		return task;
+	}
 	
 	// Function runs via VS-Code Terminal (rather dirty way)
 	async function flash(terminal: vscode.Terminal) {
@@ -190,14 +217,9 @@ class CmdProvider {
 	constructor() {
 		this.entries = [
 			{
-				label : 'Set RIOT Path',
-				cmd: 'riot-launcher.setRiotPath',
-				icon: 'file-directory'
-			},
-			{
 				label : 'Select Example Folder',
 				cmd: 'riot-launcher.selectExampleFolder',
-				icon: 'folder'
+				icon: 'file-directory'
 			},
 			{
 				label : 'Select Board',
