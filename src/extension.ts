@@ -15,12 +15,22 @@ export async function activate(context: vscode.ExtensionContext) {
 	const FOLDER_BOARD_CACHE_KEY = 'riot-launcher.folderBoardMap';
 	const ACTIVE_FOLDER_KEY = 'riot-launcher.activeFolder';
 
+
 	const storedMap = context.workspaceState.get<Record<string, string>>(FOLDER_BOARD_CACHE_KEY, {});
 	let folderBoardMap = new Map<string, string>(Object.entries(storedMap));
 	
-	let exampleFolderPath: string | undefined = context.workspaceState.get<string>(ACTIVE_FOLDER_KEY);
+	let activeFolderPath: string | undefined = context.workspaceState.get<string>(ACTIVE_FOLDER_KEY);
 
 	let selectedBoard: string | undefined;
+
+	const decorationProvider = new RiotFileDecorationProvider();
+
+	refreshWorkspaceFolderLabels();
+	decorationProvider.updateState(activeFolderPath, folderBoardMap);
+
+	context.subscriptions.push(
+		vscode.window.registerFileDecorationProvider(decorationProvider)
+	);
 
 	async function readBundledBoards(): Promise<string[]> {
 		const text : string = await fs.promises.readFile('./Uni/IOT/riot-launcher/resources/boards.txt', 'utf8');
@@ -111,38 +121,44 @@ export async function activate(context: vscode.ExtensionContext) {
 		});
 
 		if (result && result.length > 0) {
-			exampleFolderPath = result[0].fsPath;
-			
-			vscode.window.showInformationMessage(`Selected Example Folder: ${exampleFolderPath}`);
-			
-			const exampleUri = vscode.Uri.file(exampleFolderPath);
-			await vscode.commands.executeCommand('revealInExplorer', exampleUri);
-
+			activeFolderPath = result[0].fsPath;
+			context.workspaceState.update(ACTIVE_FOLDER_KEY, activeFolderPath);
+			vscode.window.showInformationMessage(`Selected Example Folder: ${activeFolderPath}`);
 			try {
 				const { stdout } = await execAsync(
-					'cd ' + exampleFolderPath + ' && make info-debug-variable-RIOTBASE'
+					'cd ' + activeFolderPath + ' && make info-debug-variable-RIOTBASE'
 				);
 				riotBasePath = stdout.toString().trim();
 				vscode.window.showInformationMessage(`Determined RIOT Base Path: ${riotBasePath}`);
 				loadBoards().then( (loadedBoards : string[]) => boards = loadedBoards);
 
 				if(selectedBoard) {
+					folderBoardMap.set(activeFolderPath, selectedBoard);
+					await context.workspaceState.update(
+						FOLDER_BOARD_CACHE_KEY,
+						Object.fromEntries(folderBoardMap)
+					);
+					vscode.window.showInformationMessage(`Associated Board "${selectedBoard}" with Folder "${activeFolderPath}".`);
 					receiveCompileCommandsTask().then( (compileTask : vscode.Task) => {
 						vscode.tasks.executeTask(compileTask);
 						vscode.window.showInformationMessage(`Successfully compiled commands.`);
 					});
 				}
 				const currentFolders = vscode.workspace.workspaceFolders || [];					
-				vscode.workspace.updateWorkspaceFolders(
-					currentFolders.length,
-					0,
-					{ 
-						uri: isSubDirecttory(riotBasePath, exampleFolderPath) ? 
-						vscode.Uri.file(riotBasePath) : vscode.Uri.file(exampleFolderPath) 
-					}
-				);
+				// vscode.workspace.updateWorkspaceFolders(
+				// 	currentFolders.length,
+				// 	0,
+				// 	{ 
+				// 		// TODO: Discuss whether opening the RIOT Base Path is desired
+				// 		// uri: isSubDirecttory(riotBasePath, activeFolderPath) ? 
+				// 		// vscode.Uri.file(riotBasePath) : vscode.Uri.file(activeFolderPath) 
+				// 		uri: vscode.Uri.file(activeFolderPath),
+				// 		name: path.basename(activeFolderPath + ' (Active)')
+				// 	}
+				// );
 				refreshWorkspaceFolderLabels(); 
-				}catch (error) {
+				decorationProvider.updateState(activeFolderPath, folderBoardMap);
+			}catch (error) {
 				vscode.window.showErrorMessage(
 					'Error determining RIOT Base Path from Makefile.'
 				);
@@ -150,20 +166,44 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
-	function refreshWorkspaceFolderLabels() {
+	async function refreshWorkspaceFolderLabels() {
+		const currentFolders = vscode.workspace.workspaceFolders || [];
 		const entries : {uri: vscode.Uri; name? : string}[] = [];
-		for (const f of vscode.workspace.workspaceFolders || []) {
+
+		for (const f of currentFolders) {
 			const fPath = f.uri.fsPath;
-			const name = path.normalize(exampleFolderPath ?? '') === path.normalize(fPath) ? 
+
+			const name = path.normalize(activeFolderPath ?? '') === path.normalize(fPath) ? 
 				path.basename(fPath) + ' (Active)' : path.basename(fPath); 
 			entries.push({uri: f.uri, name});
 		}
-		vscode.workspace.updateWorkspaceFolders(0, entries.length, ...entries);
+		if(activeFolderPath){
+			const alreadyPresent = entries.some( e => path.normalize(e.uri.fsPath) === path.normalize(activeFolderPath ?? ''));
+			if(!alreadyPresent) {
+				entries.push({
+					uri: vscode.Uri.file(activeFolderPath),
+					name: path.basename(activeFolderPath) + ' (Active)'
+				});
+			}
+			const exampleUri = vscode.Uri.file(activeFolderPath);
+			await vscode.commands.executeCommand('revealInExplorer', exampleUri);
+		}
+		vscode.workspace.updateWorkspaceFolders(0, currentFolders.length, ...entries);
 	}
 
 	const setActiveExampleFolderDisposable = vscode.commands.registerCommand('riot-launcher.setActiveExampleFolder', async (uri: vscode.Uri) => {
-		exampleFolderPath = uri.fsPath;
+		activeFolderPath = uri.fsPath;
+		selectedBoard = folderBoardMap.get(activeFolderPath);
+		if(selectedBoard) {
+			receiveCompileCommandsTask().then( (compileTask : vscode.Task) => {
+				vscode.tasks.executeTask(compileTask);
+				vscode.window.showInformationMessage(`Successfully compiled commands.`);
+			});
+		}
+		vscode.window.showInformationMessage(`Set Active Example Folder to: ${activeFolderPath}` + ' with Board: ' + (selectedBoard ?? 'None'));
+		context.workspaceState.update(ACTIVE_FOLDER_KEY, activeFolderPath);
 		refreshWorkspaceFolderLabels();
+		decorationProvider.updateState(activeFolderPath, folderBoardMap);
 	});
 
 	const selectBoardDisposable = vscode.commands.registerCommand('riot-launcher.selectBoard', async () => {
@@ -171,12 +211,21 @@ export async function activate(context: vscode.ExtensionContext) {
 		if(pick) {
 			riotDropDownBoard.text = `$(chefron-down) ${pick}`;
 			selectedBoard = pick;
+
 			vscode.window.showInformationMessage(`Selected Board: ${selectedBoard}`);
-			if(exampleFolderPath) {
+			if(activeFolderPath) {
+				folderBoardMap.set(activeFolderPath ?? '', selectedBoard);
+				await context.workspaceState.update(
+					FOLDER_BOARD_CACHE_KEY,
+					Object.fromEntries(folderBoardMap)
+				);
+
+				vscode.window.showInformationMessage(`Associated Board "${selectedBoard}" with Folder "${activeFolderPath}".`);
 				receiveCompileCommandsTask().then( (compileTask : vscode.Task) => {
 					vscode.tasks.executeTask(compileTask);
 					vscode.window.showInformationMessage(`Successfully compiled commands.`);
 				});
+				decorationProvider.updateState(activeFolderPath, folderBoardMap);
 			}
 		}
 	});
@@ -203,10 +252,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	async function receiveFlashTask() {
 		var type : string 	= "riotTaskProvider";
 		const board : string = selectedBoard ?? 'adafruit-feather-nrf52840-sense';
-		if(!exampleFolderPath) {
+		if(!activeFolderPath) {
 			vscode.window.showErrorMessage('Example Folder is not set correctly.');
 		}
-		const cDir : string = "cd " + exampleFolderPath;
+		const cDir : string = "cd " + activeFolderPath;
 		const cCommand : string = "make flash BOARD=" + board;
 
 		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCommand);
@@ -218,10 +267,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	async function receiveTermTask() {
 		var type : string 	= "riotTaskProvider";
 		const board : string = selectedBoard ?? 'adafruit-feather-nrf52840-sense';
-		if(exampleFolderPath) {
+		if(activeFolderPath) {
 			vscode.window.showErrorMessage('Example Folder is not set correctly.');
 		}
-		const cDir : string = "cd " + exampleFolderPath;
+		const cDir : string = "cd " + activeFolderPath;
 		const cCompile : string = "make compile-commands";
 		const cCommand : string = "make term BOARD=" + board;
 
@@ -234,10 +283,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	async function receiveCompileCommandsTask() {
 		var type : string 	= "riotTaskProvider";
 		const board : string = selectedBoard ?? 'adafruit-feather-nrf52840-sense';
-		if(!exampleFolderPath) {
+		if(!activeFolderPath) {
 			vscode.window.showErrorMessage('Example Folder is not set correctly.');
 		}
-		const cDir : string = "cd " + exampleFolderPath;
+		const cDir : string = "cd " + activeFolderPath;
 		const cCompile : string = "make compile-commands BOARD=" + board;		
 
 		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCompile);
@@ -249,7 +298,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	async function receiveRiotBasePath() {
 		var type : string 	= "riotTaskProvider";
-		const cDir : string = "cd " + exampleFolderPath;
+		const cDir : string = "cd " + activeFolderPath;
 		const cDetermineRiot : string = "make info-debug-variable-RIOTBASE";
 
 		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cDetermineRiot);
@@ -325,8 +374,48 @@ class CmdProvider {
 	getChildren() {
     	return Promise.resolve(this.entries.map(e => new CmdItem(e.label, e.cmd, e.icon)));
   	}
-
-	
-
 }
 	
+class RiotFileDecorationProvider implements vscode.FileDecorationProvider {
+	private _onDidChangeFileDecorations = new vscode.EventEmitter<vscode.Uri | vscode.Uri[] | undefined>();
+	readonly onDidChangeFileDecorations = this._onDidChangeFileDecorations.event;
+
+	private activeFolderPath: string | undefined;
+	private folderBoardMap = new Map<string, string>();
+	
+	constructor(){}
+
+	public updateState(activePath: string | undefined, folderBoardMap: Map<string, string>) {
+		this.activeFolderPath = activePath;
+		this.folderBoardMap = folderBoardMap;
+		this._onDidChangeFileDecorations.fire(undefined);
+	}
+
+	provideFileDecoration(uri: vscode.Uri, _token: vscode.CancellationToken): vscode.FileDecoration | undefined{
+		const fsPath = uri.fsPath;
+
+		const normalizedUriPath = path.normalize(fsPath);
+		const normalizeActivePath = this.activeFolderPath ? path.normalize(this.activeFolderPath) : undefined;
+
+		const isActive = normalizeActivePath === normalizedUriPath;
+		const assignedBoard = this.folderBoardMap.get(normalizedUriPath);
+
+		if(isActive) {
+			return {
+				badge: 'A',
+				tooltip: `Active RIOT Folder ${assignedBoard ? `- Board: ${assignedBoard}` : ''}`,
+				color: new vscode.ThemeColor('charts.blue'),
+				propagate: false
+			};
+		}
+	
+		if(assignedBoard) {
+			return {
+				badge: 'B',
+				tooltip: `Assigned Board: ${assignedBoard}`,
+			};
+		}
+
+		return undefined;
+	}
+}
