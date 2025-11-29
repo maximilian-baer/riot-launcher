@@ -34,7 +34,12 @@
       {
         "command": "riot-launcher.setRiotPath",
         "title": "RIOT Set Path"
+      },
+      {
+        "command": "riot-launcher.setActiveExampleFolder",
+        "title": "RIOT Set Active"
       }
+    
     ],
     "configuration": {
       "title": "RIOT Launcher",
@@ -89,6 +94,13 @@
           "command": "riot-launcher.riotTerm",
           "when": "view == riotView",
           "group": "navigation@5"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "riot-launcher.setActiveExampleFolder",
+          "when": "explorerResourceIsRoot",
+          "group": "navigation"
         }
       ]
     }

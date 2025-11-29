@@ -4,18 +4,30 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { exec } from 'child_process';
 import * as util from 'util';
-import { stdout } from 'process';
+import { realpathSync } from 'fs';
+import * as path from 'path';
+import { ref } from 'process';
+
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
+	const FOLDER_BOARD_CACHE_KEY = 'riot-launcher.folderBoardMap';
+	const ACTIVE_FOLDER_KEY = 'riot-launcher.activeFolder';
+
+	const storedMap = context.workspaceState.get<Record<string, string>>(FOLDER_BOARD_CACHE_KEY, {});
+	let folderBoardMap = new Map<string, string>(Object.entries(storedMap));
+	
+	let exampleFolderPath: string | undefined = context.workspaceState.get<string>(ACTIVE_FOLDER_KEY);
+
+	let selectedBoard: string | undefined;
+
 	async function readBundledBoards(): Promise<string[]> {
 		const text : string = await fs.promises.readFile('./Uni/IOT/riot-launcher/resources/boards.txt', 'utf8');
 		return text.split('\n').filter(line => line.length > 0);
 	}
 
 	let boards : string[] = await readBundledBoards().catch<string[]>( (_err) => ['adafruit-feather-nrf52840-sense'] );
-	var selectedBoard : string;
 
 	const riotDropDownBoard = vscode.window.createStatusBarItem(
 		vscode.StatusBarAlignment.Left, 101
@@ -84,7 +96,6 @@ export async function activate(context: vscode.ExtensionContext) {
 	}	
 }
 
-	let exampleFolderPath: string | undefined;
 
 	const selectExampleFolderDisposable = vscode.commands.registerCommand('riot-launcher.selectExampleFolder', async () => {
 		if (!riotBasePath) {
@@ -101,11 +112,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
 		if (result && result.length > 0) {
 			exampleFolderPath = result[0].fsPath;
+			
 			vscode.window.showInformationMessage(`Selected Example Folder: ${exampleFolderPath}`);
 			
 			const exampleUri = vscode.Uri.file(exampleFolderPath);
-			await vscode.commands.executeCommand('vscode.openFolder', exampleUri);
-			
+			await vscode.commands.executeCommand('revealInExplorer', exampleUri);
+
 			try {
 				const { stdout } = await execAsync(
 					'cd ' + exampleFolderPath + ' && make info-debug-variable-RIOTBASE'
@@ -113,18 +125,45 @@ export async function activate(context: vscode.ExtensionContext) {
 				riotBasePath = stdout.toString().trim();
 				vscode.window.showInformationMessage(`Determined RIOT Base Path: ${riotBasePath}`);
 				loadBoards().then( (loadedBoards : string[]) => boards = loadedBoards);
+
 				if(selectedBoard) {
 					receiveCompileCommandsTask().then( (compileTask : vscode.Task) => {
 						vscode.tasks.executeTask(compileTask);
 						vscode.window.showInformationMessage(`Successfully compiled commands.`);
 					});
 				}
-			}catch (error) {
+				const currentFolders = vscode.workspace.workspaceFolders || [];					
+				vscode.workspace.updateWorkspaceFolders(
+					currentFolders.length,
+					0,
+					{ 
+						uri: isSubDirecttory(riotBasePath, exampleFolderPath) ? 
+						vscode.Uri.file(riotBasePath) : vscode.Uri.file(exampleFolderPath) 
+					}
+				);
+				refreshWorkspaceFolderLabels(); 
+				}catch (error) {
 				vscode.window.showErrorMessage(
 					'Error determining RIOT Base Path from Makefile.'
-				); 
+				);
 			}
 		}
+	});
+
+	function refreshWorkspaceFolderLabels() {
+		const entries : {uri: vscode.Uri; name? : string}[] = [];
+		for (const f of vscode.workspace.workspaceFolders || []) {
+			const fPath = f.uri.fsPath;
+			const name = path.normalize(exampleFolderPath ?? '') === path.normalize(fPath) ? 
+				path.basename(fPath) + ' (Active)' : path.basename(fPath); 
+			entries.push({uri: f.uri, name});
+		}
+		vscode.workspace.updateWorkspaceFolders(0, entries.length, ...entries);
+	}
+
+	const setActiveExampleFolderDisposable = vscode.commands.registerCommand('riot-launcher.setActiveExampleFolder', async (uri: vscode.Uri) => {
+		exampleFolderPath = uri.fsPath;
+		refreshWorkspaceFolderLabels();
 	});
 
 	const selectBoardDisposable = vscode.commands.registerCommand('riot-launcher.selectBoard', async () => {
@@ -144,7 +183,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	const flashDisposable = vscode.commands.registerCommand('riot-launcher.riotFlash', () => {
 		const terminal : vscode.Terminal = vscode.window.createTerminal("Riot Launcher");
-		// flash(terminal);
+		// flash(terminal);	
 		receiveFlashTask().then( (flashTask : vscode.Task) => {
 			vscode.tasks.executeTask(flashTask);
 		});
@@ -226,6 +265,17 @@ export async function activate(context: vscode.ExtensionContext) {
 		const cCommand : string = "make flash BOARD=adafruit-feather-nrf52840-sense";
 		terminal.sendText(cDir + " && " + cCommand);
 	}
+
+	function isSubDirecttory(parent: string, dir : string) : boolean {
+		const parentReal = realpathSync(parent);
+		const dirReal = realpathSync(dir);
+		const relative = path.relative(parentReal, dirReal);
+		return (
+			relative !== '' &&
+			!relative.startsWith('..') &&
+			!path.isAbsolute(relative)
+		);
+	}
 }
 
 
@@ -275,6 +325,8 @@ class CmdProvider {
 	getChildren() {
     	return Promise.resolve(this.entries.map(e => new CmdItem(e.label, e.cmd, e.icon)));
   	}
+
+	
 
 }
 	
