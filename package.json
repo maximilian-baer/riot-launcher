@@ -39,7 +39,6 @@
         "command": "riot-launcher.setActiveExampleFolder",
         "title": "RIOT Set Active"
       }
-    
     ],
     "configuration": {
       "title": "RIOT Launcher",
@@ -124,5 +123,8 @@
     "@vscode/test-electron": "^2.5.2",
     "eslint": "^9.36.0",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "serialport": "^13.0.0"
   }
 }

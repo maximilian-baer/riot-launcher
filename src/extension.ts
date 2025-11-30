@@ -293,7 +293,6 @@ export async function activate(context: vscode.ExtensionContext) {
 		var task : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
 					"Compile Commands", "riot-launcher", execution);
 		return task;
-
 	}
 
 	async function receiveRiotBasePath() {
