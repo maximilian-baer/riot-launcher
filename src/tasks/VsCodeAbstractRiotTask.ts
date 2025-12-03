@@ -27,6 +27,7 @@ export abstract class VsCodeAbstractRiotTask extends AbstractRiotTask{
         );
     }
 
+    /* Template method returns command to execute in application folder*/ 
     protected abstract getStringShellCommand(): string;
 
 }

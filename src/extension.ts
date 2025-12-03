@@ -6,7 +6,10 @@ import { exec } from 'child_process';
 import * as util from 'util';
 import { realpathSync } from 'fs';
 import * as path from 'path';
-import { ref } from 'process';
+import { BoardRecognizer } from './boards/BoardRecognizer';
+import { PortDiscovery } from './boards/PortDiscoverer';
+import { DeviceProvider } from './DeviceProvider';
+import { Device } from './device';
 
 
 // This method is called when your extension is activated
@@ -31,6 +34,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.window.registerFileDecorationProvider(decorationProvider)
 	);
+
 
 	async function readBundledBoards(): Promise<string[]> {
 		const text : string = await fs.promises.readFile('./Uni/IOT/riot-launcher/resources/boards.txt', 'utf8');
@@ -61,6 +65,54 @@ export async function activate(context: vscode.ExtensionContext) {
   	const provider = new CmdProvider();
 	context.subscriptions.push(vscode.window.registerTreeDataProvider('riotView', provider));
 
+	const deviceProvider : DeviceProvider = new DeviceProvider();
+	context.subscriptions.push(vscode.window.registerTreeDataProvider('deviceView', deviceProvider));
+
+	const addDeviceDisposable = vscode.commands.registerCommand('riot-launcher.addDevice', async (device : Device) => {
+		deviceProvider.addDevice(new Device());
+	});
+
+	const setBoardDeviceDisposable = vscode.commands.registerCommand('riot-launcher.changeBoardDevice', async (device: Device) => {
+		if(!device) {
+			vscode.window.showErrorMessage('No device selected.');
+			return;
+		}
+		const pick : string | undefined = await vscode.window.showQuickPick(boards, {
+			title: 'Device configuration',
+			placeHolder: 'Select new board for device'
+		});
+		if(pick) {
+			device.setBoard(pick);
+			vscode.window.showInformationMessage(`Changed board of device to: ${pick}`);
+			deviceProvider.refresh();
+		}
+	});
+
+	const setPortDeviceDisposable = vscode.commands.registerCommand('riot-launcher.changePortDevice', async (device: Device) => {
+		if(!device) {
+			vscode.window.showErrorMessage('No device selected.');
+			return;
+		}
+		const newPort : string | undefined = await vscode.window.showInputBox({
+			title: 'Device configuration',
+			prompt: 'Enter new port path',
+			value: device.portPath
+		});	
+		if(newPort) {
+			device.setPortPath(newPort);
+			vscode.window.showInformationMessage(`Changed port of device to: ${newPort}`);
+			deviceProvider.refresh();
+		}
+	});
+	
+	const removeDeviceDisposable = vscode.commands.registerCommand('riot-launcher.removeDevice', async (device: Device) => {
+		if(!device) {
+			vscode.window.showErrorMessage('No device selected.');
+			return;
+		}
+		deviceProvider.removeDevice(device);
+		vscode.window.showInformationMessage(`Removed device at port: ${device.portPath}`);
+	});
 
 	const setRiotPathDisposable = vscode.commands.registerCommand('riot-launcher.setRiotPath', async () => {
 		const result = await vscode.window.showOpenDialog({
@@ -207,7 +259,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	});
 
 	const selectBoardDisposable = vscode.commands.registerCommand('riot-launcher.selectBoard', async () => {
-	 	const pick : string | undefined = await vscode.window.showQuickPick(readBundledBoards());
+	 	const pick : string | undefined = await vscode.window.showQuickPick(boards);
 		if(pick) {
 			riotDropDownBoard.text = `$(chefron-down) ${pick}`;
 			selectedBoard = pick;
@@ -243,6 +295,14 @@ export async function activate(context: vscode.ExtensionContext) {
 		receiveTermTask().then( (termTask : vscode.Task) => {
 			vscode.tasks.executeTask(termTask);
 		});
+	});
+
+	const searchPortsDisposable = vscode.commands.registerCommand('riot-launcher.detectPorts', async () => {
+		const boardRegonizer = new BoardRecognizer (context, boards);
+		const portDiscoverer = new PortDiscovery(boardRegonizer);
+		const foundDevices = await portDiscoverer.discoverPorts();
+		deviceProvider.refresh(foundDevices);
+
 	});
 
 	context.subscriptions.push(flashDisposable);
@@ -353,6 +413,11 @@ class CmdProvider {
 				icon: 'file-directory'
 			},
 			{
+				label : 'Detect Ports',
+				cmd: 'riot-launcher.detectPorts',
+				icon: 'compass'
+			},
+			{
 				label : 'Select Board',
 				cmd: 'riot-launcher.selectBoard',
 				icon: 'keybindings-record-keys'
@@ -418,3 +483,4 @@ class RiotFileDecorationProvider implements vscode.FileDecorationProvider {
 		return undefined;
 	}
 }
+
