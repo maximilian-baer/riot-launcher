@@ -13,8 +13,8 @@ export class PortDiscovery {
             if(port.path.includes('USB') || port.path.includes('COM') || port.path.includes('ACM')) {
                 console.log(`Found port: ${port.path}\n VendorId: ${port.vendorId} ProductId: ${port.productId}\n`); 
                 const detection = this.recognizer.recognizeBoard(port.vendorId, port.productId, port.serialNumber);
-                const boardName = detection ? detection.friendlyName : 'Unknown Board';
-                const description = detection ? `Detected via ${detection.source}` : 'Board not recognized';
+                const boardName = detection ? detection.boardId : 'Unknown Board';
+                const description = "";
                 const device = new Device(
                     port.path,
                     boardName,

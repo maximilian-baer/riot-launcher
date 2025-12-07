@@ -43,4 +43,8 @@ export class DeviceProvider implements vscode.TreeDataProvider<Device> {
         this.devices.push(device);
         this.refresh();
     }
+
+    public getDevices(): Device[] {
+        return this.devices;
+    }
 }

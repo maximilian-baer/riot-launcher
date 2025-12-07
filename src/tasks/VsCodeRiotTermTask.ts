@@ -8,10 +8,10 @@ export class VsCodeRiotTermTask extends VsCodeAbstractRiotDeviceTask {
         applicationPath: string,
         device : Device
     ) {
-        super(applicationPath, device, "RIOT Flash");
+        super(applicationPath, device, "RIOT Term");
     }
 
     protected getStringMakeCommand(): string {
-        return 'make flash';
+        return 'make term';
     }
 }

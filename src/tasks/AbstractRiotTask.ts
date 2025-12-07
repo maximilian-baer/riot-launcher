@@ -1,4 +1,5 @@
 import vscode from "vscode";
+import { Device } from "../device";
 
 
 export abstract class AbstractRiotTask {
@@ -7,9 +8,9 @@ export abstract class AbstractRiotTask {
     constructor(
         public readonly applicationPath: string,
 
-        public readonly board : string,
-        
-        public readonly port  : string
+        public readonly device : Device,
+
+        protected readonly taskName: string,
     ) {
         this.task = this.internalCreateTask();
     }

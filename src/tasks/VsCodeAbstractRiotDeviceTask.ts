@@ -14,12 +14,12 @@ export abstract class VsCodeAbstractRiotDeviceTask extends VsCodeAbstractRiotTas
 
     protected getStringShellCommand(): string {
         const cDir = `cd ${this.applicationPath}`;
-        const makeCommand = this.getStringShellCommand();
-        var shellCommand = 
-            `cd ${this.applicationPath} 
-            && ${makeCommand} 
-            BOARD=${this.device.boardName ?? ''} 
-            PORT=${this.device.portPath ?? ''}`;
+        const makeCommand = this.getStringMakeCommand();
+                var shellCommand = 
+            `cd ${this.applicationPath} && ${makeCommand} BOARD=${this.device.boardName ?? 'native64'}`;
+        if(this.device.portPath) {
+            shellCommand.concat(`PORT=${this.device.portPath ?? ''}`);
+        }
         return shellCommand;
     }
 

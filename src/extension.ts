@@ -9,27 +9,34 @@ import * as path from 'path';
 import { BoardRecognizer } from './boards/BoardRecognizer';
 import { PortDiscovery } from './boards/PortDiscoverer';
 import { DeviceProvider } from './DeviceProvider';
-import { Device } from './device';
+import { Device, DeviceConfig } from './device';
+import { VsCodeRiotFlashTask } from './tasks/VsCodeRiotFlashTask';
+import { VsCodeCompileCommandsTask } from './tasks/VsCodeCompileCommandsTask';
+import { VsCodeRiotTermTask } from './tasks/VsCodeRiotTermTask';
 
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
-	const FOLDER_BOARD_CACHE_KEY = 'riot-launcher.folderBoardMap';
+	const FOLDER_DEVICE_CACHE_KEY = 'riot-launcher.folderDeviceMap';
 	const ACTIVE_FOLDER_KEY = 'riot-launcher.activeFolder';
 
 
-	const storedMap = context.workspaceState.get<Record<string, string>>(FOLDER_BOARD_CACHE_KEY, {});
-	let folderBoardMap = new Map<string, string>(Object.entries(storedMap));
+	const storedMap = context.workspaceState.get<Record<string, DeviceConfig>>(FOLDER_DEVICE_CACHE_KEY, {});
+	let folderDeviceMap = new Map<string, Device>();
 	
+	for(const entry of Object.entries(storedMap)) {
+		folderDeviceMap.set(entry[0], Device.fromConfig(entry[1]));
+	}
+
 	let activeFolderPath: string | undefined = context.workspaceState.get<string>(ACTIVE_FOLDER_KEY);
 
-	let selectedBoard: string | undefined;
+	let selectedDevice: Device | undefined;
 
 	const decorationProvider = new RiotFileDecorationProvider();
 
 	refreshWorkspaceFolderLabels();
-	decorationProvider.updateState(activeFolderPath, folderBoardMap);
+	decorationProvider.updateState(activeFolderPath, folderDeviceMap);
 
 	context.subscriptions.push(
 		vscode.window.registerFileDecorationProvider(decorationProvider)
@@ -184,19 +191,20 @@ export async function activate(context: vscode.ExtensionContext) {
 				vscode.window.showInformationMessage(`Determined RIOT Base Path: ${riotBasePath}`);
 				loadBoards().then( (loadedBoards : string[]) => boards = loadedBoards);
 
-				if(selectedBoard) {
-					folderBoardMap.set(activeFolderPath, selectedBoard);
-					await context.workspaceState.update(
-						FOLDER_BOARD_CACHE_KEY,
-						Object.fromEntries(folderBoardMap)
-					);
-					vscode.window.showInformationMessage(`Associated Board "${selectedBoard}" with Folder "${activeFolderPath}".`);
-					receiveCompileCommandsTask().then( (compileTask : vscode.Task) => {
-						vscode.tasks.executeTask(compileTask);
-						vscode.window.showInformationMessage(`Successfully compiled commands.`);
-					});
+				if(selectedDevice) {
+					folderDeviceMap.set(activeFolderPath, selectedDevice);
+					await saveFolderMapState();
+					vscode.window.showInformationMessage(`Associated Board "${selectedDevice}" with Folder "${activeFolderPath}".`);
+					const compileTask = new VsCodeCompileCommandsTask(activeFolderPath, selectedDevice).getVscodeTask();
+					if(!compileTask) {
+						vscode.window.showErrorMessage("Something went wrong creating the Flash Task");
+						return;
+					}
+					vscode.tasks.executeTask(compileTask);
 				}
-				const currentFolders = vscode.workspace.workspaceFolders || [];					
+				const currentFolders = vscode.workspace.workspaceFolders || [];	
+				/* This would ensure that examples opened within the RIOT folder would 
+				open the whole repository instead of just the application folder */ 				
 				// vscode.workspace.updateWorkspaceFolders(
 				// 	currentFolders.length,
 				// 	0,
@@ -209,7 +217,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				// 	}
 				// );
 				refreshWorkspaceFolderLabels(); 
-				decorationProvider.updateState(activeFolderPath, folderBoardMap);
+				decorationProvider.updateState(activeFolderPath, folderDeviceMap);
 			}catch (error) {
 				vscode.window.showErrorMessage(
 					'Error determining RIOT Base Path from Makefile.'
@@ -245,56 +253,85 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	const setActiveExampleFolderDisposable = vscode.commands.registerCommand('riot-launcher.setActiveExampleFolder', async (uri: vscode.Uri) => {
 		activeFolderPath = uri.fsPath;
-		selectedBoard = folderBoardMap.get(activeFolderPath);
-		if(selectedBoard) {
-			receiveCompileCommandsTask().then( (compileTask : vscode.Task) => {
-				vscode.tasks.executeTask(compileTask);
-				vscode.window.showInformationMessage(`Successfully compiled commands.`);
-			});
+		selectedDevice = folderDeviceMap.get(activeFolderPath);
+		if(selectedDevice) {
+			const compileTask = new VsCodeCompileCommandsTask(activeFolderPath, selectedDevice).getVscodeTask();
+			if(!compileTask) {
+				vscode.window.showErrorMessage("Something went wrong creating the Flash Task");
+				return;
+			}
+			vscode.tasks.executeTask(compileTask);
 		}
-		vscode.window.showInformationMessage(`Set Active Example Folder to: ${activeFolderPath}` + ' with Board: ' + (selectedBoard ?? 'None'));
+		vscode.window.showInformationMessage(`Set Active Example Folder to: ${activeFolderPath}` + ' with Board: ' + (selectedDevice ?? 'None'));
 		context.workspaceState.update(ACTIVE_FOLDER_KEY, activeFolderPath);
 		refreshWorkspaceFolderLabels();
-		decorationProvider.updateState(activeFolderPath, folderBoardMap);
+		decorationProvider.updateState(activeFolderPath, folderDeviceMap);
 	});
 
 	const selectBoardDisposable = vscode.commands.registerCommand('riot-launcher.selectBoard', async () => {
-	 	const pick : string | undefined = await vscode.window.showQuickPick(boards);
-		if(pick) {
+	 	const devices = deviceProvider.getDevices();
+		const picks = devices.map(d => ({
+			label: d.label as string,
+			description: d.portPath,
+			detail: d.description,
+			device: d
+		}));
+
+		const selection = await vscode.window.showQuickPick(picks, {
+			placeHolder: 'Choose a device'
+		});
+		if(selection) {
+			const pick = selection.device;
 			riotDropDownBoard.text = `$(chefron-down) ${pick}`;
-			selectedBoard = pick;
+			selectedDevice = pick;
 
-			vscode.window.showInformationMessage(`Selected Board: ${selectedBoard}`);
+			vscode.window.showInformationMessage(`Selected Board: ${selectedDevice}`);
 			if(activeFolderPath) {
-				folderBoardMap.set(activeFolderPath ?? '', selectedBoard);
-				await context.workspaceState.update(
-					FOLDER_BOARD_CACHE_KEY,
-					Object.fromEntries(folderBoardMap)
-				);
+				folderDeviceMap.set(activeFolderPath ?? '', selectedDevice);
+				saveFolderMapState();
 
-				vscode.window.showInformationMessage(`Associated Board "${selectedBoard}" with Folder "${activeFolderPath}".`);
-				receiveCompileCommandsTask().then( (compileTask : vscode.Task) => {
-					vscode.tasks.executeTask(compileTask);
-					vscode.window.showInformationMessage(`Successfully compiled commands.`);
-				});
-				decorationProvider.updateState(activeFolderPath, folderBoardMap);
+				vscode.window.showInformationMessage(`Associated Board "${selectedDevice}" with Folder "${activeFolderPath}".`);
+				if(!activeFolderPath || !selectedDevice) {
+					vscode.window.showErrorMessage("Application folder or device not properly selected.");
+					return;
+				}
+				const compileTask = new VsCodeCompileCommandsTask(activeFolderPath, selectedDevice).getVscodeTask();
+				if(!compileTask) {
+					vscode.window.showErrorMessage("Something went wrong creating the Flash Task");
+					return;
+				}
+				vscode.tasks.executeTask(compileTask);
+				decorationProvider.updateState(activeFolderPath, folderDeviceMap);
 			}
 		}
 	});
 
 	const flashDisposable = vscode.commands.registerCommand('riot-launcher.riotFlash', () => {
-		const terminal : vscode.Terminal = vscode.window.createTerminal("Riot Launcher");
-		// flash(terminal);	
-		receiveFlashTask().then( (flashTask : vscode.Task) => {
-			vscode.tasks.executeTask(flashTask);
-		});
+		// flash(terminal);
+		if(!activeFolderPath || !selectedDevice) {
+			vscode.window.showErrorMessage("Application folder or device not properly selected.");
+			return;
+		}
+		const flashTask = new VsCodeRiotFlashTask(activeFolderPath, selectedDevice).getVscodeTask();
+		if(!flashTask) {
+			vscode.window.showErrorMessage("Something went wrong creating the Flash Task");
+			return;
+		}
+		vscode.tasks.executeTask(flashTask);
 	});
 
 	const termDisposable = vscode.commands.registerCommand('riot-launcher.riotTerm', () => {
-		const terminal : vscode.Terminal = vscode.window.createTerminal("Riot Launcher");
-		receiveTermTask().then( (termTask : vscode.Task) => {
-			vscode.tasks.executeTask(termTask);
-		});
+		if(!activeFolderPath || !selectedDevice) {
+			vscode.window.showErrorMessage("Application folder or device not properly selected.");
+			return;
+		}
+		const termTask = new VsCodeRiotTermTask(activeFolderPath, selectedDevice).getVscodeTask();
+		if(!termTask) {
+			vscode.window.showErrorMessage("Something went wrong creating the Flash Task");
+			return;
+		}
+		vscode.tasks.executeTask(termTask);
+
 	});
 
 	const searchPortsDisposable = vscode.commands.registerCommand('riot-launcher.detectPorts', async () => {
@@ -305,54 +342,21 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	});
 
+
 	context.subscriptions.push(flashDisposable);
 
 	context.subscriptions.push(termDisposable);
 
-	async function receiveFlashTask() {
-		var type : string 	= "riotTaskProvider";
-		const board : string = selectedBoard ?? 'adafruit-feather-nrf52840-sense';
-		if(!activeFolderPath) {
-			vscode.window.showErrorMessage('Example Folder is not set correctly.');
+	context.subscriptions.push(searchPortsDisposable);
+
+	async function saveFolderMapState() {
+		const toSave: Record<string, DeviceConfig> = {};
+	
+		for (const entry of folderDeviceMap) {
+			toSave[entry[0]] = entry[1].toConfig();
 		}
-		const cDir : string = "cd " + activeFolderPath;
-		const cCommand : string = "make flash BOARD=" + board;
 
-		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCommand);
-		var flash : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
-                    "Flash", "riot-launcher", execution);
-		return flash;
-	}
-
-	async function receiveTermTask() {
-		var type : string 	= "riotTaskProvider";
-		const board : string = selectedBoard ?? 'adafruit-feather-nrf52840-sense';
-		if(activeFolderPath) {
-			vscode.window.showErrorMessage('Example Folder is not set correctly.');
-		}
-		const cDir : string = "cd " + activeFolderPath;
-		const cCompile : string = "make compile-commands";
-		const cCommand : string = "make term BOARD=" + board;
-
-		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCommand);
-		var flash : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
-                    "Term", "riot-launcher", execution);
-		return flash;
-	}
-
-	async function receiveCompileCommandsTask() {
-		var type : string 	= "riotTaskProvider";
-		const board : string = selectedBoard ?? 'adafruit-feather-nrf52840-sense';
-		if(!activeFolderPath) {
-			vscode.window.showErrorMessage('Example Folder is not set correctly.');
-		}
-		const cDir : string = "cd " + activeFolderPath;
-		const cCompile : string = "make compile-commands BOARD=" + board;		
-
-		var execution : vscode.ShellExecution = new vscode.ShellExecution(cDir + " && " + cCompile);
-		var task : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
-					"Compile Commands", "riot-launcher", execution);
-		return task;
+		await context.workspaceState.update(FOLDER_DEVICE_CACHE_KEY, toSave);
 	}
 
 	async function receiveRiotBasePath() {
@@ -364,14 +368,6 @@ export async function activate(context: vscode.ExtensionContext) {
 		var task : vscode.Task = new vscode.Task({type: type} , vscode.TaskScope.Workspace,
                     "Set Path", "riot-launcher", execution);
 		return task;
-	}
-	
-	// Function runs via VS-Code Terminal (rather dirty way)
-	async function flash(terminal: vscode.Terminal) {
-		terminal.show(true);
-		const cDir : string = "cd ~/Uni/IOT/RIOT/examples/basic/blinky";
-		const cCommand : string = "make flash BOARD=adafruit-feather-nrf52840-sense";
-		terminal.sendText(cDir + " && " + cCommand);
 	}
 
 	function isSubDirecttory(parent: string, dir : string) : boolean {
@@ -445,13 +441,13 @@ class RiotFileDecorationProvider implements vscode.FileDecorationProvider {
 	readonly onDidChangeFileDecorations = this._onDidChangeFileDecorations.event;
 
 	private activeFolderPath: string | undefined;
-	private folderBoardMap = new Map<string, string>();
+	private folderDeviceMap = new Map<string, Device>();
 	
 	constructor(){}
 
-	public updateState(activePath: string | undefined, folderBoardMap: Map<string, string>) {
+	public updateState(activePath: string | undefined, folderDeviceMap: Map<string, Device>) {
 		this.activeFolderPath = activePath;
-		this.folderBoardMap = folderBoardMap;
+		this.folderDeviceMap = folderDeviceMap;
 		this._onDidChangeFileDecorations.fire(undefined);
 	}
 
@@ -462,12 +458,12 @@ class RiotFileDecorationProvider implements vscode.FileDecorationProvider {
 		const normalizeActivePath = this.activeFolderPath ? path.normalize(this.activeFolderPath) : undefined;
 
 		const isActive = normalizeActivePath === normalizedUriPath;
-		const assignedBoard = this.folderBoardMap.get(normalizedUriPath);
+		const assignedBoard = this.folderDeviceMap.get(normalizedUriPath);
 
 		if(isActive) {
 			return {
 				badge: 'A',
-				tooltip: `Active RIOT Folder ${assignedBoard ? `- Board: ${assignedBoard}` : ''}`,
+				tooltip: `Assigned Board: ${assignedBoard?.boardName} (Port: ${assignedBoard?.portPath ?? '?'})`,
 				color: new vscode.ThemeColor('charts.blue'),
 				propagate: false
 			};
@@ -476,7 +472,7 @@ class RiotFileDecorationProvider implements vscode.FileDecorationProvider {
 		if(assignedBoard) {
 			return {
 				badge: 'B',
-				tooltip: `Assigned Board: ${assignedBoard}`,
+				tooltip: `Assigned Board: ${assignedBoard.boardName} (Port: ${assignedBoard?.portPath ?? '?'})`,
 			};
 		}
 

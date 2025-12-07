@@ -6,7 +6,6 @@ import { boardsDB } from "./knownBoards";
 export interface DetectionResult {
     boardId: string; 
     friendlyName: string;
-    source: 'memory' | 'database' | 'unknown';
 }
 
 export class BoardRecognizer {
@@ -29,7 +28,6 @@ export class BoardRecognizer {
             return {
                 boardId: match.boardId,
                 friendlyName: match.boardName,
-                source: 'database'
             };
         }
         return undefined;
