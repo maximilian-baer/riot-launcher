@@ -8,8 +8,8 @@ export class DeviceProvider implements vscode.TreeDataProvider<Device> {
 
     private devices: Device[] = [];
 
-    constructor() {
-        this.devices = [];  
+    constructor(devices? : Device[]) {
+        this.devices = devices ?? [];  
     }
 
     refresh(newDevices?: Device[]): void {

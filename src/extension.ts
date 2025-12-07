@@ -20,6 +20,7 @@ import { VsCodeRiotTermTask } from './tasks/VsCodeRiotTermTask';
 export async function activate(context: vscode.ExtensionContext) {
 	const FOLDER_DEVICE_CACHE_KEY = 'riot-launcher.folderDeviceMap';
 	const ACTIVE_FOLDER_KEY = 'riot-launcher.activeFolder';
+	const DEVICE_LIST_CACHE_KEY = 'riot-launcher.deviceList';
 
 
 	const storedMap = context.workspaceState.get<Record<string, DeviceConfig>>(FOLDER_DEVICE_CACHE_KEY, {});
@@ -37,6 +38,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	refreshWorkspaceFolderLabels();
 	decorationProvider.updateState(activeFolderPath, folderDeviceMap);
+
+	const initialDevicesConfig = context.workspaceState.get<DeviceConfig[]>(DEVICE_LIST_CACHE_KEY, []);
+	const initialDevices: Device[] = initialDevicesConfig.map(d => Device.fromConfig(d));
 
 	context.subscriptions.push(
 		vscode.window.registerFileDecorationProvider(decorationProvider)
@@ -72,11 +76,12 @@ export async function activate(context: vscode.ExtensionContext) {
   	const provider = new CmdProvider();
 	context.subscriptions.push(vscode.window.registerTreeDataProvider('riotView', provider));
 
-	const deviceProvider : DeviceProvider = new DeviceProvider();
+	const deviceProvider : DeviceProvider = new DeviceProvider(initialDevices);
 	context.subscriptions.push(vscode.window.registerTreeDataProvider('deviceView', deviceProvider));
 
 	const addDeviceDisposable = vscode.commands.registerCommand('riot-launcher.addDevice', async (device : Device) => {
 		deviceProvider.addDevice(new Device());
+		saveDeviceListState();
 	});
 
 	const setBoardDeviceDisposable = vscode.commands.registerCommand('riot-launcher.changeBoardDevice', async (device: Device) => {
@@ -92,6 +97,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			device.setBoard(pick);
 			vscode.window.showInformationMessage(`Changed board of device to: ${pick}`);
 			deviceProvider.refresh();
+			saveDeviceListState();
 		}
 	});
 
@@ -109,6 +115,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			device.setPortPath(newPort);
 			vscode.window.showInformationMessage(`Changed port of device to: ${newPort}`);
 			deviceProvider.refresh();
+			saveDeviceListState();
 		}
 	});
 	
@@ -119,6 +126,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 		deviceProvider.removeDevice(device);
 		vscode.window.showInformationMessage(`Removed device at port: ${device.portPath}`);
+		saveDeviceListState();
 	});
 
 	const setRiotPathDisposable = vscode.commands.registerCommand('riot-launcher.setRiotPath', async () => {
@@ -357,6 +365,12 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 
 		await context.workspaceState.update(FOLDER_DEVICE_CACHE_KEY, toSave);
+	}
+
+	async function saveDeviceListState() {
+		const currentDevices = deviceProvider.getDevices();
+		const configList = currentDevices.map(d => d.toConfig());
+		await context.workspaceState.update(DEVICE_LIST_CACHE_KEY, configList);
 	}
 
 	async function receiveRiotBasePath() {
