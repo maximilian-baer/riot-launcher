@@ -105,8 +105,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		if(!device) {
 			vscode.window.showErrorMessage('No device selected.');
 			return;
-		}
-		const newPort : string | undefined = await vscode.window.showInputBox({
+			}
+			const newPort : string | undefined = await vscode.window.showInputBox({
 			title: 'Device configuration',
 			prompt: 'Enter new port path',
 			value: device.portPath
@@ -115,7 +115,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			device.setPortPath(newPort);
 			vscode.window.showInformationMessage(`Changed port of device to: ${newPort}`);
 			deviceProvider.refresh();
-			saveDeviceListState();
+			saveDeviceListState();	
 		}
 	});
 	
@@ -276,6 +276,51 @@ export async function activate(context: vscode.ExtensionContext) {
 		decorationProvider.updateState(activeFolderPath, folderDeviceMap);
 	});
 
+	const setFolderDeviceDisposable = vscode.commands.registerCommand('riot-launcher.changeFolderDevice', async (uri: vscode.Uri) => {
+		const selectedFolderPath = uri.fsPath;
+		const devices = deviceProvider.getDevices();
+		const picks = devices.map(d => ({
+			label: d.label as string,
+			description: d.portPath,
+			detail: d.description,
+			device: d
+		}));
+
+		const selection = await vscode.window.showQuickPick(picks, {
+			placeHolder: 'Choose a device'
+		});
+		if(selection) {
+			const pick = selection.device;
+			riotDropDownBoard.text = `$(chefron-down) ${pick}`;
+			selectedDevice = pick;
+
+			vscode.window.showInformationMessage(`Selected Board: ${selectedDevice}`);
+			if(selectedFolderPath) {
+				folderDeviceMap.set(selectedFolderPath ?? '', selectedDevice);
+				saveFolderMapState();
+
+				vscode.window.showInformationMessage(`Associated Board "${selectedDevice}" with Folder "${activeFolderPath}".`);
+				if(!selectedFolderPath || !selectedDevice) {
+					vscode.window.showErrorMessage("Application folder or device not properly selected.");
+					return;
+				}
+				if(selectedFolderPath === activeFolderPath) {
+					const compileTask = new VsCodeCompileCommandsTask(activeFolderPath, selectedDevice).getVscodeTask();
+					if(!compileTask) {
+						vscode.window.showErrorMessage("Something went wrong creating the Flash Task");
+						return;
+					}
+					vscode.tasks.executeTask(compileTask);
+				}
+				decorationProvider.updateState(activeFolderPath, folderDeviceMap);
+				saveFolderMapState();
+				refreshWorkspaceFolderLabels();
+			}
+		}
+	});
+
+	context.subscriptions.push(setFolderDeviceDisposable);
+
 	const selectBoardDisposable = vscode.commands.registerCommand('riot-launcher.selectBoard', async () => {
 	 	const devices = deviceProvider.getDevices();
 		const picks = devices.map(d => ({
@@ -293,7 +338,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			riotDropDownBoard.text = `$(chefron-down) ${pick}`;
 			selectedDevice = pick;
 
-			vscode.window.showInformationMessage(`Selected Board: ${selectedDevice}`);
+			vscode.window.showInformationMessage(`Selected Board: ${selectedDevice.boardName}`);
 			if(activeFolderPath) {
 				folderDeviceMap.set(activeFolderPath ?? '', selectedDevice);
 				saveFolderMapState();
@@ -347,7 +392,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		const portDiscoverer = new PortDiscovery(boardRegonizer);
 		const foundDevices = await portDiscoverer.discoverPorts();
 		deviceProvider.refresh(foundDevices);
-
+		saveDeviceListState();
 	});
 
 

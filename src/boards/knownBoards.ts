@@ -18,4 +18,6 @@ export const boardsDB: BoardStruct[] = [
     { vendorId: '2341', productId: '0042', boardId: 'arduino-mega2560', boardName: 'Arduino Mega 2560' },
     
     { vendorId: '0483', productId: '374b', boardId: 'nucleo-f401re', boardName: 'STM32 Nucleo-64 (Default)' },
+
+    { vendorId: '1209', productId: '7d00', boardId: 'adafruit-feather-nrf52840-sense', boardName: 'adafruit-feather-nrf52840-sense'}
 ];
